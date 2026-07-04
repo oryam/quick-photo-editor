@@ -604,6 +604,19 @@ export default function CanvasWorkspace({
                     >
                       {ov.content}
                     </span>
+                  ) : ov.type === 'custom_image' ? (
+                    <img 
+                      src={ov.content}
+                      referrerPolicy="no-referrer"
+                      style={{ 
+                        width: `${(ov.size / 100) * canvasDisplaySize.width}px`,
+                        height: 'auto',
+                        maxHeight: '100%',
+                        pointerEvents: 'none'
+                      }}
+                      className="select-none pointer-events-none drop-shadow-md"
+                      alt="Custom Overlay"
+                    />
                   ) : (
                     <span
                       style={{ 
@@ -639,16 +652,18 @@ export default function CanvasWorkspace({
                       </div>
 
                       {/* Edit/Pencil handle bottom left */}
-                      <button
-                        title="Modifier le texte"
-                        className="absolute -bottom-3.5 -left-3.5 p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-md pointer-events-auto cursor-pointer"
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          setEditingOverlayId(ov.id);
-                        }}
-                      >
-                        <Edit2 className="w-2.5 h-2.5" />
-                      </button>
+                      {ov.type !== 'custom_image' && (
+                        <button
+                          title="Modifier le texte"
+                          className="absolute -bottom-3.5 -left-3.5 p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-md pointer-events-auto cursor-pointer"
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            setEditingOverlayId(ov.id);
+                          }}
+                        >
+                          <Edit2 className="w-2.5 h-2.5" />
+                        </button>
+                      )}
 
                       {/* Resize Handle bottom right */}
                       <div

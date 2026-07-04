@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   EditMode, 
   ImageAdjustments, 
@@ -15,7 +15,9 @@ import {
   Undo,
   Heading,
   Smile,
-  Plus
+  Plus,
+  Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -43,7 +45,7 @@ interface ToolbarProps {
   strokeCount: number;
 
   // Overlay add trigger
-  onAddOverlay: (type: 'text' | 'emoji', content: string, color: string, fontFamily: string, size: number) => void;
+  onAddOverlay: (type: 'text' | 'emoji' | 'custom_image', content: string, color: string, fontFamily: string, size: number) => void;
 
   // Selected Overlay editing props
   selectedOverlayId: string | null;
@@ -98,14 +100,52 @@ export default function Toolbar({
   onUpdateOverlays
 }: ToolbarProps) {
   // Overlay form states
-  const [overlayTab, setOverlayTab] = useState<'text' | 'emoji'>('text');
+  const [overlayTab, setOverlayTab] = useState<'text' | 'emoji' | 'custom_image'>('text');
   const [textVal, setTextVal] = useState('Impressionnant');
   const [textColor, setTextColor] = useState('#ffffff');
   const [textFont, setTextFont] = useState('Inter');
-  const [textScale, setTextScale] = useState(8); // % of image width
+  const [lastUsedSizes, setLastUsedSizes] = useState<Record<'text' | 'emoji' | 'custom_image', number>>({
+    text: 8,
+    emoji: 12,
+    custom_image: 12
+  });
   const [customEmoji, setCustomEmoji] = useState('');
+  const [customIcons, setCustomIcons] = useState<string[]>([]);
 
   const selectedOverlay = overlays?.find(o => o.id === selectedOverlayId) || null;
+
+  // Track the size of any currently selected and resized overlay to remember it for future elements of the same type
+  useEffect(() => {
+    if (selectedOverlay) {
+      setLastUsedSizes(prev => ({
+        ...prev,
+        [selectedOverlay.type]: selectedOverlay.size
+      }));
+    }
+  }, [selectedOverlay?.id, selectedOverlay?.size, selectedOverlay?.type]);
+
+  const handleCustomIconUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        // Add to session in-memory list
+        setCustomIcons((prev) => [...prev, dataUrl]);
+        // Also immediately add it to the image as a new overlay using the last used custom_image size!
+        onAddOverlay('custom_image', dataUrl, '', '', lastUsedSizes.custom_image);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Reset file input value so same file can be uploaded again if needed
+    e.target.value = '';
+  };
+
+  const handleAddCustomIcon = (dataUrl: string) => {
+    onAddOverlay('custom_image', dataUrl, '', '', lastUsedSizes.custom_image);
+  };
 
   const handleUpdateSelectedOverlay = (fields: Partial<OverlayItem>) => {
     if (!selectedOverlay) return;
@@ -139,11 +179,11 @@ export default function Toolbar({
   const handleAddText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textVal.trim()) return;
-    onAddOverlay('text', textVal, textColor, textFont, textScale);
+    onAddOverlay('text', textVal, textColor, textFont, lastUsedSizes.text);
   };
 
   const handleAddEmoji = (emoji: string) => {
-    onAddOverlay('emoji', emoji, '', 'system-ui', textScale * 1.5); // Emoji needs relative extra scale
+    onAddOverlay('emoji', emoji, '', 'system-ui', lastUsedSizes.emoji);
   };
 
   return (
@@ -581,15 +621,15 @@ export default function Toolbar({
                 <div>
                   <h4 className="text-slate-200 text-xs font-bold flex items-center gap-1.5">
                     <Type className="w-3.5 h-3.5 text-emerald-400" />
-                    Ajouter du Texte & Émojis
+                    Ajouter du Texte, Émojis & Icônes
                   </h4>
                   <p className="text-[10px] text-slate-500 mt-1 leading-normal">
-                    Ajoutez des titres ou autocollants. Ajustez la taille et tirez pour les placer librement.
+                    Ajoutez des titres, autocollants ou icônes personnalisées. Ajustez la taille et tirez pour les placer librement.
                   </p>
                 </div>
 
-                {/* Element Tabs (Texte vs Emoji) */}
-                <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800/60 font-sans">
+                {/* Element Tabs (Texte vs Emoji vs Custom) */}
+                <div className="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800/60 font-sans">
                   <button
                     id="tab-overlay-text"
                     onClick={() => setOverlayTab('text')}
@@ -614,6 +654,19 @@ export default function Toolbar({
                   >
                     <Smile className="w-3 h-3" />
                     Émojis
+                  </button>
+
+                  <button
+                    id="tab-overlay-custom"
+                    onClick={() => setOverlayTab('custom_image')}
+                    className={`py-1 rounded-md text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                      overlayTab === 'custom_image'
+                        ? 'bg-slate-800 text-emerald-400 shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <ImageIcon className="w-3 h-3" />
+                    Perso
                   </button>
                 </div>
 
@@ -668,24 +721,6 @@ export default function Toolbar({
                           className="flex-1 bg-slate-900 border border-slate-800 rounded-lg text-slate-300 text-xs px-2 py-1.5 outline-none focus:border-emerald-500 uppercase font-mono"
                         />
                       </div>
-                    </div>
-
-                    {/* Font Scale Size */}
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-[11px] font-medium text-slate-400">
-                        <span>Taille proportionnelle</span>
-                        <span className="text-emerald-400 font-bold font-mono">{textScale}%</span>
-                      </div>
-                      <input
-                        id="overlay-size-slider"
-                        type="range"
-                        min="2"
-                        max="30"
-                        step="0.5"
-                        value={textScale}
-                        onChange={(e) => setTextScale(parseFloat(e.target.value))}
-                        className="w-full accent-emerald-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
-                      />
                     </div>
 
                     {/* Submit button */}
@@ -747,24 +782,54 @@ export default function Toolbar({
                         </button>
                       </div>
                     </div>
+                  </div>
+                )}
 
-                    {/* Font Scale Size */}
-                    <div className="space-y-1.5 animate-fadeIn">
-                      <div className="flex justify-between text-[11px] font-medium text-slate-400">
-                        <span>Taille de l'émoji</span>
-                        <span className="text-emerald-400 font-bold font-mono">{textScale}%</span>
-                      </div>
-                      <input
-                        id="emoji-size-slider"
-                        type="range"
-                        min="2"
-                        max="30"
-                        step="0.5"
-                        value={textScale}
-                        onChange={(e) => setTextScale(parseFloat(e.target.value))}
-                        className="w-full accent-emerald-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer"
-                      />
+                {/* CUSTOM IMAGE UPLOADER & GRID */}
+                {overlayTab === 'custom_image' && (
+                  <div className="space-y-4 pt-1 animate-fadeIn">
+                    <div className="space-y-2">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Importer une icône (.png, .jpg, .svg, etc.)</span>
+                      
+                      <label 
+                        className="flex flex-col items-center justify-center border border-dashed border-slate-800 hover:border-emerald-500/50 bg-slate-900/60 hover:bg-slate-900/90 rounded-xl p-4 cursor-pointer transition-all group/upload"
+                      >
+                        <Upload className="w-5 h-5 text-slate-500 group-hover/upload:text-emerald-400 mb-1.5 transition-colors" />
+                        <span className="text-[11px] text-slate-400 font-medium group-hover/upload:text-slate-200">Choisir un fichier</span>
+                        <span className="text-[9px] text-slate-650 mt-1">SVG, PNG, JPG... gardé en mémoire</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={handleCustomIconUpload} 
+                        />
+                      </label>
                     </div>
+
+                    {/* In-Memory Custom Icons Gallery */}
+                    {customIcons.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-slate-900 animate-fadeIn">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Vos icônes de la session ({customIcons.length})</span>
+                        <div className="grid grid-cols-4 gap-2">
+                          {customIcons.map((dataUrl, idx) => (
+                            <button
+                              key={idx}
+                              id={`custom-icon-btn-${idx}`}
+                              onClick={() => handleAddCustomIcon(dataUrl)}
+                              title="Ajouter à l'image"
+                              className="relative p-1.5 bg-slate-950 border border-slate-800 hover:border-emerald-500/50 rounded-lg flex items-center justify-center cursor-pointer transition-all group h-12"
+                            >
+                              <img 
+                                src={dataUrl} 
+                                referrerPolicy="no-referrer"
+                                className="max-w-full max-h-full object-contain pointer-events-none group-hover:scale-105 transition-transform" 
+                                alt="Custom icon template" 
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </>

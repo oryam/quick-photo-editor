@@ -260,7 +260,7 @@ export default function App() {
 
   // Overlay insertions
   const handleAddOverlay = (
-    type: 'text' | 'emoji',
+    type: 'text' | 'emoji' | 'custom_image',
     content: string,
     color: string,
     fontFamily: string,

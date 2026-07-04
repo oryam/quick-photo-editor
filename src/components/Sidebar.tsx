@@ -43,6 +43,7 @@ export default function Sidebar({
     if (e.target.files && e.target.files.length > 0) {
       onAddImages(e.target.files);
     }
+    e.target.value = '';
   };
 
   const selectedImage = images.find(img => img.id === selectedImageId);

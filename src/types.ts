@@ -7,7 +7,7 @@ export interface BlurStroke {
 
 export interface OverlayItem {
   id: string;
-  type: 'text' | 'emoji';
+  type: 'text' | 'emoji' | 'custom_image';
   content: string;
   x: number; // Coordinates as % of original/cropped image (0 to 100)
   y: number; // Coordinates as % of original/cropped image (0 to 100)
