@@ -54,3 +54,11 @@ export interface GlobalOptimizeSettings {
 }
 
 export type EditMode = 'none' | 'blur_brush' | 'crop' | 'adjust' | 'text_overlay';
+
+export interface ConversionTask {
+  id: string;
+  name: string;
+  status: 'converting' | 'loading' | 'done' | 'failed';
+  error?: string;
+}
+

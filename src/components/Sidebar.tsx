@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ImageItem } from '../types';
+import { ImageItem, ConversionTask } from '../types';
 import { formatBytes } from '../utils/imageHelpers';
 import { 
   Plus, 
@@ -12,7 +12,10 @@ import {
   ShieldCheck,
   Server,
   X,
-  ExternalLink
+  ExternalLink,
+  Check,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -24,6 +27,8 @@ interface SidebarProps {
   onDownloadSingle: (image: ImageItem) => void;
   onDownloadAllZip: () => void;
   isDownloading: boolean;
+  conversions?: ConversionTask[];
+  onClearConversion?: (id: string) => void;
 }
 
 export default function Sidebar({
@@ -34,7 +39,9 @@ export default function Sidebar({
   onDeleteImage,
   onDownloadSingle,
   onDownloadAllZip,
-  isDownloading
+  isDownloading,
+  conversions = [],
+  onClearConversion
 }: SidebarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -74,10 +81,84 @@ export default function Sidebar({
           ref={fileInputRef}
           onChange={handleFileChange}
           multiple
-          accept="image/*"
+          accept="image/*,.heic,.heif,.webp"
           className="hidden"
         />
       </div>
+
+      {/* Background/Progressive Conversions List */}
+      {conversions && conversions.length > 0 && (
+        <div id="conversions-queue-section" className="border-b border-slate-800 bg-slate-900/15 p-4 space-y-2.5 flex-none select-none animate-fadeIn">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[10px] font-semibold text-slate-400 tracking-wider uppercase flex items-center gap-1.5">
+              <Loader2 className="w-3 h-3 text-emerald-400 animate-spin" />
+              Tâches actives ({conversions.filter(c => c.status !== 'done' && c.status !== 'failed').length})
+            </h3>
+            <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-emerald-950/60 border border-emerald-900/40 text-emerald-400 rounded-md">
+              {conversions.filter(c => c.status === 'done').length}/{conversions.length} OK
+            </span>
+          </div>
+
+          <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+            {conversions.map((task) => {
+              return (
+                <div 
+                  key={task.id} 
+                  className={`text-[11px] p-2 rounded-lg border flex items-center justify-between gap-2 transition-all duration-200 ${
+                    task.status === 'failed'
+                      ? 'bg-rose-950/15 border-rose-900/30 text-rose-200'
+                      : 'bg-slate-950/40 border-slate-900/60 text-slate-300'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate text-slate-200 leading-snug">{task.name}</p>
+                    <p className="text-[9px] text-slate-500 mt-0.5 flex items-center gap-1">
+                      {task.status === 'converting' && (
+                        <>
+                          <Loader2 className="w-2.5 h-2.5 text-emerald-500 animate-spin" />
+                          <span>Conversion HEIC...</span>
+                        </>
+                      )}
+                      {task.status === 'loading' && (
+                        <>
+                          <Loader2 className="w-2.5 h-2.5 text-teal-400 animate-spin" />
+                          <span>Analyse de l'image...</span>
+                        </>
+                      )}
+                      {task.status === 'done' && (
+                        <span className="text-emerald-400 font-medium">Prêt</span>
+                      )}
+                      {task.status === 'failed' && (
+                        <span className="text-rose-400 font-medium">Échec</span>
+                      )}
+                    </p>
+                  </div>
+                  
+                  <div className="flex-none flex items-center gap-1.5">
+                    {task.status === 'done' && (
+                      <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+                    )}
+                    {task.status === 'failed' && (
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                    )}
+                    
+                    {/* Clear/dismiss button */}
+                    {(task.status === 'done' || task.status === 'failed') && onClearConversion && (
+                      <button
+                        onClick={() => onClearConversion(task.id)}
+                        className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
+                        title="Masquer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Gallery List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-slate-800 hover:scrollbar-thumb-slate-700">

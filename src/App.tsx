@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import JSZip from 'jszip';
+import heic2any from 'heic2any';
 import { 
   ImageItem, 
   EditMode, 
   CropState, 
   ImageAdjustments, 
-  GlobalOptimizeSettings 
+  GlobalOptimizeSettings,
+  ConversionTask
 } from './types';
 import Sidebar from './components/Sidebar';
 import Toolbar from './components/Toolbar';
@@ -17,7 +19,10 @@ import {
   Sliders, 
   Eye, 
   HelpCircle,
-  FileDown
+  FileDown,
+  Loader2,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 
 export default function App() {
@@ -25,6 +30,26 @@ export default function App() {
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<EditMode>('none');
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+
+  // Conversion / user feedback states
+  const [conversions, setConversions] = useState<ConversionTask[]>([]);
+  const [isConverting, setIsConverting] = useState(false);
+  const [conversionMessage, setConversionMessage] = useState('');
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  const handleClearConversionTask = (id: string) => {
+    setConversions(prev => prev.filter(t => t.id !== id));
+  };
+
+  // Auto-dismiss toast notification after 6 seconds
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Reset overlay selection when editMode or active image changes
   useEffect(() => {
@@ -97,23 +122,100 @@ export default function App() {
     };
   }, [images]);
 
-  // Handle files parsing & loading
-  const addFilesToGallery = async (files: FileList) => {
-    const newItems: ImageItem[] = [];
+  // Handle files parsing & loading progressively in the background
+  const addFilesToGallery = async (filesList: FileList) => {
+    // Convert live FileList to a static JavaScript array immediately
+    const files = Array.from(filesList);
+    if (files.length === 0) return;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (!file.type.startsWith('image/')) continue;
-
-      const objectUrl = URL.createObjectURL(file);
+    // Filter and map valid file entries
+    const fileEntries = files.map((file, i) => {
+      const fileNameLower = file.name.toLowerCase();
+      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || 
+                      fileNameLower.endsWith('.heic') || fileNameLower.endsWith('.heif');
+      const isWebp = file.type === 'image/webp' || fileNameLower.endsWith('.webp');
+      const isOtherImage = file.type && typeof file.type === 'string' && file.type.startsWith('image/');
       
+      return {
+        file,
+        index: i,
+        isHeic,
+        isWebp,
+        isOtherImage,
+        isValid: isHeic || isWebp || isOtherImage
+      };
+    }).filter(entry => entry.isValid);
+
+    if (fileEntries.length === 0) {
+      setToast({
+        type: 'error',
+        text: "Aucun fichier d'image valide n'a été sélectionné."
+      });
+      return;
+    }
+
+    // Switch to edit tab on mobile so the user can see progress or start editing
+    setMobileTab('edit');
+
+    // Create initial background task objects for all file entries
+    const initialTasks: ConversionTask[] = fileEntries.map((entry, idx) => {
+      const tempId = `task-${Date.now()}-${entry.index}-${idx}-${Math.round(Math.random() * 1000000)}`;
+      return {
+        id: tempId,
+        name: entry.file.name,
+        status: entry.isHeic ? 'converting' : 'loading'
+      };
+    });
+
+    // Append to conversions list state
+    setConversions(prev => [...prev, ...initialTasks]);
+
+    // Process all files in parallel but progressively updates the UI
+    fileEntries.forEach(async (entry, idx) => {
+      const task = initialTasks[idx];
+      const { file, isHeic } = entry;
+      let finalFile: File = file;
+      let objectUrl = '';
+      let finalName = file.name;
+
       try {
+        if (isHeic) {
+          // Safe HEIC Conversion helper
+          let convertFn = heic2any;
+          if (typeof convertFn !== 'function') {
+            if (convertFn && (convertFn as any).default && typeof (convertFn as any).default === 'function') {
+              convertFn = (convertFn as any).default;
+            } else if (typeof window !== 'undefined' && (window as any).heic2any && typeof (window as any).heic2any === 'function') {
+              convertFn = (window as any).heic2any;
+            }
+          }
+
+          if (typeof convertFn !== 'function') {
+            throw new Error("Bibliothèque de conversion HEIC non initialisée.");
+          }
+
+          const blobForConversion = new Blob([file], { type: file.type || 'image/heic' });
+          const result = await convertFn({
+            blob: blobForConversion,
+            toType: 'image/jpeg',
+            quality: 0.9
+          });
+          const convertedBlob = Array.isArray(result) ? result[0] : result;
+          finalName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+          finalFile = new File([convertedBlob], finalName, { type: 'image/jpeg' });
+        }
+
+        // HEIC conversion finished, now loading the image to read its dimensions
+        setConversions(prev => prev.map(t => t.id === task.id ? { ...t, status: 'loading' } : t));
+
+        objectUrl = URL.createObjectURL(finalFile);
         const loadedImg = await loadImage(objectUrl);
-        
-        newItems.push({
-          id: 'img-' + Date.now() + '-' + Math.round(Math.random() * 1000),
-          name: file.name,
-          file,
+        const uniqueId = `img-${Date.now()}-${entry.index}-${Math.round(Math.random() * 1000000)}`;
+
+        const newItem: ImageItem = {
+          id: uniqueId,
+          name: finalName,
+          file: finalFile,
           objectUrl,
           width: loadedImg.naturalWidth || loadedImg.width,
           height: loadedImg.naturalHeight || loadedImg.height,
@@ -126,22 +228,37 @@ export default function App() {
           crop: null,
           blurStrokes: [],
           overlays: []
-        });
-      } catch (err) {
-        console.error('Erreur au chargement de l\'image ' + file.name, err);
-      }
-    }
+        };
 
-    if (newItems.length > 0) {
-      setImages((prev) => {
-        const updated = [...prev, ...newItems];
-        // Auto select first of added images
-        setSelectedImageId(newItems[0].id);
-        return updated;
-      });
-      setEditMode('none');
-      setMobileTab('edit'); // Transition instantly to the editor on mobile when photos are loaded
-    }
+        // Add to images list immediately
+        setImages((prev) => {
+          const updated = [...prev, newItem];
+          // If no image is selected, select the first successful newly imported image
+          setSelectedImageId((curr) => curr ? curr : uniqueId);
+          return updated;
+        });
+
+        // Set status to done
+        setConversions(prev => prev.map(t => t.id === task.id ? { ...t, status: 'done' } : t));
+
+        // Automatically dismiss success status task from sidebar list after 4 seconds
+        setTimeout(() => {
+          setConversions(prev => prev.filter(t => t.id !== task.id));
+        }, 4000);
+
+      } catch (err: any) {
+        console.error(`Erreur de traitement pour ${file.name}:`, err);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+
+        const errMsg = err?.message || String(err);
+        setConversions(prev => prev.map(t => t.id === task.id ? { ...t, status: 'failed', error: "Échec" } : t));
+        
+        setToast({
+          type: 'error',
+          text: `Impossible d'importer ${file.name}: ${errMsg}`
+        });
+      }
+    });
   };
 
   // State modifiers
@@ -357,6 +474,36 @@ export default function App() {
       <div className="absolute top-0 left-1/3 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none z-0" />
       <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none z-0" />
 
+      {/* Safe HEIC conversion modal loading screen overlay */}
+      {isConverting && (
+        <div id="converting-overlay-screen" className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 animate-fadeIn">
+          <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col items-center gap-4 max-w-xs w-full text-center">
+            <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+            <div>
+              <h3 className="font-sans font-bold text-slate-200 text-sm">Traitement en cours</h3>
+              <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">{conversionMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast alert system */}
+      {toast && (
+        <div id="app-toast-alert" className="absolute top-4 right-4 z-50 animate-fadeIn">
+          <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shadow-xl max-w-sm ${
+            toast.type === 'success' 
+              ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-200' 
+              : toast.type === 'error'
+              ? 'bg-rose-950/90 border-rose-500/30 text-rose-200'
+              : 'bg-slate-900/95 border-slate-800 text-slate-200'
+          }`}>
+            {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-none" />}
+            {toast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-none" />}
+            <span className="text-[11px] font-medium leading-tight">{toast.text}</span>
+          </div>
+        </div>
+      )}
+
       {/* Fullscreen dragover files drop wrapper overlay */}
       {isDraggingOver && (
         <div id="dragover-dropzone-screen" className="absolute inset-0 bg-emerald-950/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-8 border-4 border-dashed border-emerald-400 m-4 rounded-3xl animate-fadeIn pointer-events-none">
@@ -410,6 +557,8 @@ export default function App() {
             onDownloadSingle={handleDownloadSingle}
             onDownloadAllZip={handleDownloadAllZip}
             isDownloading={isDownloading}
+            conversions={conversions}
+            onClearConversion={handleClearConversionTask}
           />
         </div>
 
