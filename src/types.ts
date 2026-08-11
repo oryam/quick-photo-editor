@@ -7,7 +7,7 @@ export interface BlurStroke {
 
 export interface OverlayItem {
   id: string;
-  type: 'text' | 'emoji' | 'custom_image';
+  type: 'text' | 'emoji';
   content: string;
   x: number; // Coordinates as % of original/cropped image (0 to 100)
   y: number; // Coordinates as % of original/cropped image (0 to 100)
@@ -32,10 +32,9 @@ export interface ImageAdjustments {
   generalBlur: number; // 0 to 100 (0 is default)
 }
 
-export interface ImageItem {
+export interface ImageHistoryEntry {
   id: string;
-  name: string;
-  file: File;
+  label: string;
   objectUrl: string;
   width: number;
   height: number;
@@ -43,6 +42,25 @@ export interface ImageItem {
   crop: CropState | null;
   blurStrokes: BlurStroke[];
   overlays: OverlayItem[];
+  timestamp: number;
+}
+
+export interface ImageItem {
+  id: string;
+  name: string;
+  file: File;
+  originalObjectUrl: string;
+  originalWidth: number;
+  originalHeight: number;
+  objectUrl: string;
+  width: number;
+  height: number;
+  adjustments: ImageAdjustments;
+  crop: CropState | null;
+  blurStrokes: BlurStroke[];
+  overlays: OverlayItem[];
+  history: ImageHistoryEntry[];
+  historyIndex: number;
 }
 
 export interface GlobalOptimizeSettings {
@@ -54,11 +72,3 @@ export interface GlobalOptimizeSettings {
 }
 
 export type EditMode = 'none' | 'blur_brush' | 'crop' | 'adjust' | 'text_overlay';
-
-export interface ConversionTask {
-  id: string;
-  name: string;
-  status: 'converting' | 'loading' | 'done' | 'failed';
-  error?: string;
-}
-

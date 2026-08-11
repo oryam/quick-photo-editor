@@ -182,16 +182,6 @@ export async function renderImageToCanvas(
     if (item.type === 'emoji') {
       ctx.font = `${fontSizePx}px system-ui, -apple-system, sans-serif`;
       ctx.fillText(item.content, 0, 0);
-    } else if (item.type === 'custom_image') {
-      try {
-        const customImg = await loadImage(item.content);
-        const drawW = fontSizePx;
-        const imgAspect = (customImg.naturalWidth || customImg.width) / (customImg.naturalHeight || customImg.height);
-        const drawH = drawW / imgAspect;
-        ctx.drawImage(customImg, -drawW / 2, -drawH / 2, drawW, drawH);
-      } catch (err) {
-        console.error("Failed to render custom image overlay", err);
-      }
     } else {
       ctx.fillStyle = item.color;
       ctx.font = `${fontSizePx}px "${item.fontFamily || 'Inter'}", sans-serif`;

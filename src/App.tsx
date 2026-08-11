@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import JSZip from 'jszip';
-import heic2any from 'heic2any';
 import { 
   ImageItem, 
+  ImageHistoryEntry,
   EditMode, 
   CropState, 
   ImageAdjustments, 
-  GlobalOptimizeSettings,
-  ConversionTask
+  GlobalOptimizeSettings 
 } from './types';
 import Sidebar from './components/Sidebar';
 import Toolbar from './components/Toolbar';
@@ -19,10 +18,7 @@ import {
   Sliders, 
   Eye, 
   HelpCircle,
-  FileDown,
-  Loader2,
-  AlertCircle,
-  CheckCircle2
+  FileDown
 } from 'lucide-react';
 
 export default function App() {
@@ -30,26 +26,6 @@ export default function App() {
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState<EditMode>('none');
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
-
-  // Conversion / user feedback states
-  const [conversions, setConversions] = useState<ConversionTask[]>([]);
-  const [isConverting, setIsConverting] = useState(false);
-  const [conversionMessage, setConversionMessage] = useState('');
-  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-
-  const handleClearConversionTask = (id: string) => {
-    setConversions(prev => prev.filter(t => t.id !== id));
-  };
-
-  // Auto-dismiss toast notification after 6 seconds
-  useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => {
-        setToast(null);
-      }, 6000);
-      return () => clearTimeout(timer);
-    }
-  }, [toast]);
 
   // Reset overlay selection when editMode or active image changes
   useEffect(() => {
@@ -73,8 +49,9 @@ export default function App() {
     preserveExif: false
   });
 
-  // Global downloading state indicator
+  // Global downloading & processing states
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   
   // Visual dragover file loading states
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -122,143 +99,73 @@ export default function App() {
     };
   }, [images]);
 
-  // Handle files parsing & loading progressively in the background
-  const addFilesToGallery = async (filesList: FileList) => {
-    // Convert live FileList to a static JavaScript array immediately
-    const files = Array.from(filesList);
-    if (files.length === 0) return;
+  // Handle files parsing & loading
+  const addFilesToGallery = async (files: FileList) => {
+    const newItems: ImageItem[] = [];
 
-    // Filter and map valid file entries
-    const fileEntries = files.map((file, i) => {
-      const fileNameLower = file.name.toLowerCase();
-      const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || 
-                      fileNameLower.endsWith('.heic') || fileNameLower.endsWith('.heif');
-      const isWebp = file.type === 'image/webp' || fileNameLower.endsWith('.webp');
-      const isOtherImage = file.type && typeof file.type === 'string' && file.type.startsWith('image/');
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.type.startsWith('image/')) continue;
+
+      const objectUrl = URL.createObjectURL(file);
       
-      return {
-        file,
-        index: i,
-        isHeic,
-        isWebp,
-        isOtherImage,
-        isValid: isHeic || isWebp || isOtherImage
-      };
-    }).filter(entry => entry.isValid);
-
-    if (fileEntries.length === 0) {
-      setToast({
-        type: 'error',
-        text: "Aucun fichier d'image valide n'a été sélectionné."
-      });
-      return;
-    }
-
-    // Switch to edit tab on mobile so the user can see progress or start editing
-    setMobileTab('edit');
-
-    // Create initial background task objects for all file entries
-    const initialTasks: ConversionTask[] = fileEntries.map((entry, idx) => {
-      const tempId = `task-${Date.now()}-${entry.index}-${idx}-${Math.round(Math.random() * 1000000)}`;
-      return {
-        id: tempId,
-        name: entry.file.name,
-        status: entry.isHeic ? 'converting' : 'loading'
-      };
-    });
-
-    // Append to conversions list state
-    setConversions(prev => [...prev, ...initialTasks]);
-
-    // Process all files in parallel but progressively updates the UI
-    fileEntries.forEach(async (entry, idx) => {
-      const task = initialTasks[idx];
-      const { file, isHeic } = entry;
-      let finalFile: File = file;
-      let objectUrl = '';
-      let finalName = file.name;
-
       try {
-        if (isHeic) {
-          // Safe HEIC Conversion helper
-          let convertFn = heic2any;
-          if (typeof convertFn !== 'function') {
-            if (convertFn && (convertFn as any).default && typeof (convertFn as any).default === 'function') {
-              convertFn = (convertFn as any).default;
-            } else if (typeof window !== 'undefined' && (window as any).heic2any && typeof (window as any).heic2any === 'function') {
-              convertFn = (window as any).heic2any;
-            }
-          }
-
-          if (typeof convertFn !== 'function') {
-            throw new Error("Bibliothèque de conversion HEIC non initialisée.");
-          }
-
-          const blobForConversion = new Blob([file], { type: file.type || 'image/heic' });
-          const result = await convertFn({
-            blob: blobForConversion,
-            toType: 'image/jpeg',
-            quality: 0.9
-          });
-          const convertedBlob = Array.isArray(result) ? result[0] : result;
-          finalName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
-          finalFile = new File([convertedBlob], finalName, { type: 'image/jpeg' });
-        }
-
-        // HEIC conversion finished, now loading the image to read its dimensions
-        setConversions(prev => prev.map(t => t.id === task.id ? { ...t, status: 'loading' } : t));
-
-        objectUrl = URL.createObjectURL(finalFile);
         const loadedImg = await loadImage(objectUrl);
-        const uniqueId = `img-${Date.now()}-${entry.index}-${Math.round(Math.random() * 1000000)}`;
+        const imgWidth = loadedImg.naturalWidth || loadedImg.width;
+        const imgHeight = loadedImg.naturalHeight || loadedImg.height;
 
-        const newItem: ImageItem = {
-          id: uniqueId,
-          name: finalName,
-          file: finalFile,
-          objectUrl,
-          width: loadedImg.naturalWidth || loadedImg.width,
-          height: loadedImg.naturalHeight || loadedImg.height,
-          adjustments: {
-            brightness: 100,
-            contrast: 100,
-            saturation: 100,
-            generalBlur: 0
-          },
-          crop: null,
-          blurStrokes: [],
-          overlays: []
+        const defaultAdjustments = {
+          brightness: 100,
+          contrast: 100,
+          saturation: 100,
+          generalBlur: 0
         };
 
-        // Add to images list immediately
-        setImages((prev) => {
-          const updated = [...prev, newItem];
-          // If no image is selected, select the first successful newly imported image
-          setSelectedImageId((curr) => curr ? curr : uniqueId);
-          return updated;
-        });
-
-        // Set status to done
-        setConversions(prev => prev.map(t => t.id === task.id ? { ...t, status: 'done' } : t));
-
-        // Automatically dismiss success status task from sidebar list after 4 seconds
-        setTimeout(() => {
-          setConversions(prev => prev.filter(t => t.id !== task.id));
-        }, 4000);
-
-      } catch (err: any) {
-        console.error(`Erreur de traitement pour ${file.name}:`, err);
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-
-        const errMsg = err?.message || String(err);
-        setConversions(prev => prev.map(t => t.id === task.id ? { ...t, status: 'failed', error: "Échec" } : t));
+        const initialHistoryEntry: ImageHistoryEntry = {
+          id: 'hist-0',
+          label: "Image d'origine",
+          objectUrl,
+          width: imgWidth,
+          height: imgHeight,
+          adjustments: defaultAdjustments,
+          crop: null,
+          blurStrokes: [],
+          overlays: [],
+          timestamp: Date.now()
+        };
         
-        setToast({
-          type: 'error',
-          text: `Impossible d'importer ${file.name}: ${errMsg}`
+        newItems.push({
+          id: 'img-' + Date.now() + '-' + Math.round(Math.random() * 1000),
+          name: file.name,
+          file,
+          originalObjectUrl: objectUrl,
+          originalWidth: imgWidth,
+          originalHeight: imgHeight,
+          objectUrl,
+          width: imgWidth,
+          height: imgHeight,
+          adjustments: defaultAdjustments,
+          crop: null,
+          blurStrokes: [],
+          overlays: [],
+          history: [initialHistoryEntry],
+          historyIndex: 0
         });
+      } catch (err) {
+        console.error('Erreur au chargement de l\'image ' + file.name, err);
       }
-    });
+    }
+
+    if (newItems.length > 0) {
+      setImages((prev) => {
+        const updated = [...prev, ...newItems];
+        // Auto select first of added images
+        setSelectedImageId(newItems[0].id);
+        return updated;
+      });
+      setEditMode('none');
+      setMobileTab('edit'); // Transition instantly to the editor on mobile when photos are loaded
+    }
   };
 
   // State modifiers
@@ -377,7 +284,7 @@ export default function App() {
 
   // Overlay insertions
   const handleAddOverlay = (
-    type: 'text' | 'emoji' | 'custom_image',
+    type: 'text' | 'emoji',
     content: string,
     color: string,
     fontFamily: string,
@@ -402,6 +309,162 @@ export default function App() {
       overlays: [...selectedImage.overlays, newItem]
     });
   };
+
+  // Global Apply & Local History stack controllers
+  const handleApplyGlobalChanges = async () => {
+    if (!selectedImage || isApplying) return;
+
+    setIsApplying(true);
+    try {
+      // If user is currently in crop mode with temporaryCrop, commit crop first
+      let imageToProcess = selectedImage;
+      if (editMode === 'crop' && temporaryCrop) {
+        imageToProcess = {
+          ...selectedImage,
+          crop: { ...temporaryCrop }
+        };
+      }
+
+      // Generate rendered modified image canvas
+      const renderedCanvas = await renderImageToCanvas(imageToProcess);
+
+      // Export canvas to blob
+      const blob = await exportCanvasToBlob(renderedCanvas, 'png', 1.0);
+      const newObjectUrl = URL.createObjectURL(blob);
+      const newWidth = renderedCanvas.width;
+      const newHeight = renderedCanvas.height;
+
+      const currentHistory = selectedImage.history || [];
+      const currentIndex = selectedImage.historyIndex ?? 0;
+      const historySlice = currentHistory.slice(0, currentIndex + 1);
+
+      const newHistoryEntry: ImageHistoryEntry = {
+        id: 'hist-' + Date.now(),
+        label: `Modification #${historySlice.length}`,
+        objectUrl: newObjectUrl,
+        width: newWidth,
+        height: newHeight,
+        adjustments: { brightness: 100, contrast: 100, saturation: 100, generalBlur: 0 },
+        crop: null,
+        blurStrokes: [],
+        overlays: [],
+        timestamp: Date.now()
+      };
+
+      const newHistory = [...historySlice, newHistoryEntry];
+
+      handleUpdateImage({
+        ...selectedImage,
+        objectUrl: newObjectUrl,
+        width: newWidth,
+        height: newHeight,
+        adjustments: { brightness: 100, contrast: 100, saturation: 100, generalBlur: 0 },
+        crop: null,
+        blurStrokes: [],
+        overlays: [],
+        history: newHistory,
+        historyIndex: newHistory.length - 1
+      });
+
+      setEditMode('none');
+      setTemporaryCrop(null);
+    } catch (err) {
+      console.error("Erreur lors de l'application des modifications :", err);
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  const handleUndoHistory = () => {
+    if (!selectedImage) return;
+    const history = selectedImage.history || [];
+    const currentIndex = selectedImage.historyIndex ?? 0;
+
+    if (currentIndex > 0) {
+      const prevIndex = currentIndex - 1;
+      const snapshot = history[prevIndex];
+
+      handleUpdateImage({
+        ...selectedImage,
+        objectUrl: snapshot.objectUrl,
+        width: snapshot.width,
+        height: snapshot.height,
+        adjustments: { ...snapshot.adjustments },
+        crop: snapshot.crop ? { ...snapshot.crop } : null,
+        blurStrokes: [...snapshot.blurStrokes],
+        overlays: [...snapshot.overlays],
+        historyIndex: prevIndex
+      });
+      setEditMode('none');
+      setTemporaryCrop(null);
+    }
+  };
+
+  const handleRedoHistory = () => {
+    if (!selectedImage) return;
+    const history = selectedImage.history || [];
+    const currentIndex = selectedImage.historyIndex ?? 0;
+
+    if (currentIndex < history.length - 1) {
+      const nextIndex = currentIndex + 1;
+      const snapshot = history[nextIndex];
+
+      handleUpdateImage({
+        ...selectedImage,
+        objectUrl: snapshot.objectUrl,
+        width: snapshot.width,
+        height: snapshot.height,
+        adjustments: { ...snapshot.adjustments },
+        crop: snapshot.crop ? { ...snapshot.crop } : null,
+        blurStrokes: [...snapshot.blurStrokes],
+        overlays: [...snapshot.overlays],
+        historyIndex: nextIndex
+      });
+      setEditMode('none');
+      setTemporaryCrop(null);
+    }
+  };
+
+  const handleResetToOriginal = () => {
+    if (!selectedImage) return;
+    const history = selectedImage.history || [];
+
+    if (history.length > 0) {
+      const originalSnapshot = history[0];
+
+      handleUpdateImage({
+        ...selectedImage,
+        objectUrl: originalSnapshot.objectUrl,
+        width: originalSnapshot.width,
+        height: originalSnapshot.height,
+        adjustments: { ...originalSnapshot.adjustments },
+        crop: originalSnapshot.crop ? { ...originalSnapshot.crop } : null,
+        blurStrokes: [...originalSnapshot.blurStrokes],
+        overlays: [...originalSnapshot.overlays],
+        historyIndex: 0
+      });
+      setEditMode('none');
+      setTemporaryCrop(null);
+    }
+  };
+
+  // History and modification shortcuts for selected image
+  const history = selectedImage?.history || [];
+  const historyIndex = selectedImage?.historyIndex ?? 0;
+
+  const hasUnappliedChanges = selectedImage ? (
+    selectedImage.adjustments.brightness !== 100 ||
+    selectedImage.adjustments.contrast !== 100 ||
+    selectedImage.adjustments.saturation !== 100 ||
+    selectedImage.adjustments.generalBlur > 0 ||
+    selectedImage.crop !== null ||
+    temporaryCrop !== null ||
+    selectedImage.blurStrokes.length > 0 ||
+    selectedImage.overlays.length > 0
+  ) : false;
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
 
   // Downloads trigger single
   const handleDownloadSingle = async (image: ImageItem) => {
@@ -474,36 +537,6 @@ export default function App() {
       <div className="absolute top-0 left-1/3 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none z-0" />
       <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none z-0" />
 
-      {/* Safe HEIC conversion modal loading screen overlay */}
-      {isConverting && (
-        <div id="converting-overlay-screen" className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 animate-fadeIn">
-          <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col items-center gap-4 max-w-xs w-full text-center">
-            <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
-            <div>
-              <h3 className="font-sans font-bold text-slate-200 text-sm">Traitement en cours</h3>
-              <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">{conversionMessage}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toast alert system */}
-      {toast && (
-        <div id="app-toast-alert" className="absolute top-4 right-4 z-50 animate-fadeIn">
-          <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shadow-xl max-w-sm ${
-            toast.type === 'success' 
-              ? 'bg-emerald-950/90 border-emerald-500/30 text-emerald-200' 
-              : toast.type === 'error'
-              ? 'bg-rose-950/90 border-rose-500/30 text-rose-200'
-              : 'bg-slate-900/95 border-slate-800 text-slate-200'
-          }`}>
-            {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-none" />}
-            {toast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-none" />}
-            <span className="text-[11px] font-medium leading-tight">{toast.text}</span>
-          </div>
-        </div>
-      )}
-
       {/* Fullscreen dragover files drop wrapper overlay */}
       {isDraggingOver && (
         <div id="dragover-dropzone-screen" className="absolute inset-0 bg-emerald-950/80 backdrop-blur-md z-50 flex flex-col items-center justify-center p-8 border-4 border-dashed border-emerald-400 m-4 rounded-3xl animate-fadeIn pointer-events-none">
@@ -557,8 +590,6 @@ export default function App() {
             onDownloadSingle={handleDownloadSingle}
             onDownloadAllZip={handleDownloadAllZip}
             isDownloading={isDownloading}
-            conversions={conversions}
-            onClearConversion={handleClearConversionTask}
           />
         </div>
 
@@ -645,6 +676,16 @@ export default function App() {
                   setSelectedOverlayId={setSelectedOverlayId}
                   overlays={selectedImage.overlays}
                   onUpdateOverlays={(overlays) => handleUpdateImage({ ...selectedImage, overlays })}
+                  onApplyGlobalChanges={handleApplyGlobalChanges}
+                  isApplying={isApplying}
+                  hasUnappliedChanges={hasUnappliedChanges}
+                  canUndo={canUndo}
+                  canRedo={canRedo}
+                  onUndoHistory={handleUndoHistory}
+                  onRedoHistory={handleRedoHistory}
+                  onResetToOriginal={handleResetToOriginal}
+                  historyLength={history.length}
+                  historyIndex={historyIndex}
                 />
               </div>
             ) : (
